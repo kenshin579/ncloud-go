@@ -60,7 +60,8 @@ ncloud-go/                   module github.com/kenshin579/ncloud-go
 - `NewClient(clientID, clientSecret string, opts ...Option) (*Client, error)` — 둘 다 필수.
   `NewClientFromEnv()` 는 `NAVER_CLIENT_ID`/`NAVER_CLIENT_SECRET`.
 - 옵션 `WithBaseURL`(기본 `https://naverapihub.apigw.ntruss.com`), `WithTimeout`(30s), `WithHTTPClient`.
-- `GetJSON(ctx, c, path string, q url.Values, out any) error`
+- `GetJSON(ctx, c, path string, q url.Values, out any) error` (리뷰 반영: 2xx 에러 본문도 에러로, 그 밖 비 2xx 는 `*HTTPError`,
+  `StatusCode`/`IsRateLimited` 로 429·5xx·4xx 를 가른다, 네트워크 에러 체인 유지)
   - 2xx: 본문을 out 으로 JSON 디코드(Content-Type 무시).
   - 비 2xx: 본문이 `{"error":{...}}` 면 `*GatewayError`, `{"errorCode":..,"errorMessage":..}` 면 `*APIError`,
     그 밖엔 상태·본문 앞부분을 담은 일반 에러. errorCode 는 문자열/숫자 모두 받는다(`json.RawMessage` → 문자열).
@@ -73,7 +74,8 @@ ncloud-go/                   module github.com/kenshin579/ncloud-go
   Display 0 또는 1~100, Start 0 또는 1~1000, Sort ""|SortSim|SortDate). 0 은 서버 기본값.
 - `NewsItem` 은 원문 필드를 그대로 두고 `PubTime() (time.Time, error)` 와 `CleanTitle()`·`CleanDescription()`
   (태그 제거 + HTML 엔티티 해제)를 준다.
-- `NewsAll(ctx, query, sort, max int)` — display 100 으로 start 를 넘기며 max(≤1100) 건까지 모은다. 빈 페이지에서 멈춘다.
+- `NewsAll(ctx, query, sort, limit int)` — display 100 으로 start 를 넘기며 limit(≤1,000) 건까지 모은다. 짧은 페이지·total 에서 멈춘다.
+  (리뷰 반영 2026-10-03: start 상한 1000 이라 100건 페이지로는 1,000건이 최대. 도중 에러는 받은 결과와 함께 반환)
 - format 은 JSON 고정(XML 은 지원하지 않는다).
 
 ## 테스트·릴리스

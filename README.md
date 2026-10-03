@@ -24,7 +24,7 @@ for _, it := range res.Items {
     fmt.Println(t.Format("01-02 15:04"), it.CleanTitle(), it.URL())
 }
 
-// 여러 페이지 (한 검색어 최대 1,099건)
+// 여러 페이지 (최대 1,000건 — start 상한 1000 때문)
 items, err := s.NewsAll(ctx, "삼성전자", search.SortDate, 300)
 ```
 
@@ -42,6 +42,12 @@ items, err := s.NewsAll(ctx, "삼성전자", search.SortDate, 300)
 ```go
 var ge *ncloud.GatewayError // 키 오류·누락, API 미활성화, 호출 한도 초과 — Code/Message/Details/TraceID
 var ae *ncloud.APIError     // 서비스 거부 (검색 SE01~SE04)
+var he *ncloud.HTTPError    // 그 밖의 비 2xx (HTML 502 등)
+
+ncloud.StatusCode(err)        // 위 셋의 HTTP 상태, 아니면 0 — 429 쉬기 / 5xx 재시도 / 4xx 영구 실패를 가른다
+ncloud.IsRateLimited(err)     // 429
+errors.Is(err, search.ErrInvalidParams)       // 인자 범위 오류 (서버를 부르지 않음)
+errors.Is(err, context.DeadlineExceeded)      // 타임아웃 — 네트워크 에러 체인은 유지된다
 ```
 
 ## 옵션

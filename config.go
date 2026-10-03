@@ -2,6 +2,7 @@ package ncloud
 
 import (
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -15,7 +16,9 @@ type clientOptions struct {
 type Option func(*clientOptions)
 
 // WithBaseURL 은 게이트웨이 주소를 바꾼다 (테스트/프록시용). 기본 DefaultBaseURL.
-func WithBaseURL(u string) Option { return func(o *clientOptions) { o.baseURL = u } }
+func WithBaseURL(u string) Option {
+	return func(o *clientOptions) { o.baseURL = strings.TrimRight(u, "/") }
+}
 
 // WithTimeout 은 HTTP 타임아웃을 지정한다 (기본 30s). WithHTTPClient 를 쓰면 무시된다.
 func WithTimeout(d time.Duration) Option { return func(o *clientOptions) { o.timeout = d } }

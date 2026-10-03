@@ -10,7 +10,7 @@
 | --- | --- | --- | --- | --- |
 | query | Y | | | 검색어(UTF-8, URL 인코딩). 따옴표로 묶으면 구절 검색 |
 | display | N | 10 | 1~100 | 한 번에 받을 건수. 101 → SE02 |
-| start | N | 1 | 1~1000 | 시작 위치. 1001 → SE03. 한 검색어로 최대 1,099건 |
+| start | N | 1 | 1~1000 | 시작 위치. 1001 → SE03. 서버상 최대 1,099건, SDK `NewsAll` 은 1,000건까지 |
 | sort | N | sim | sim, date | 정확도순 / 최신순. 그 밖 → SE04 |
 | format | N | json | json, xml | xml 은 RSS 2.0. SDK 는 json 고정 |
 

@@ -2,6 +2,7 @@ package search
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"html"
 	"net/url"
@@ -25,8 +26,10 @@ const (
 const (
 	MaxDisplay = 100
 	MaxStart   = 1000
-	// MaxResults 는 한 검색어로 받을 수 있는 최대 건수(start 1000 + display 100 - 1).
-	MaxResults = MaxStart + MaxDisplay - 1
+	// MaxResults 는 NewsAll 이 모으는 최대 건수. start 는 1~1000 이라 display 100 페이지로는
+	// 1, 101, …, 901 의 10페이지 = 1,000건까지다(서버 이론상 최대 1,099건은 마지막 페이지를
+	// 겹쳐 받아야 해서 쓰지 않는다 — 종목 뉴스에 1,000건이면 충분하다).
+	MaxResults = MaxStart
 )
 
 // NewsParams 는 뉴스 검색 인자다. 0·빈 값은 서버 기본값(display 10, start 1, sort sim).
@@ -72,7 +75,8 @@ func (n NewsItem) URL() string {
 	return n.Link
 }
 
-var tagRe = regexp.MustCompile(`<[^>]*>`)
+// tagRe 는 네이버가 강조에 쓰는 <b>·</b> 만 지운다. 일반 "<" 를 태그로 보면 "PER<10배, PBR>1배" 가 망가진다.
+var tagRe = regexp.MustCompile(`(?i)</?b>`)
 
 // Clean 은 HTML 태그를 지우고 엔티티(&quot; &amp; 등)를 푼다.
 func Clean(s string) string {
@@ -95,15 +99,19 @@ func (s *Service) News(ctx context.Context, p NewsParams) (*NewsResult, error) {
 	return &out, nil
 }
 
-// NewsAll 은 display 100 으로 start 를 넘기며 최대 max 건(≤ MaxResults)을 모은다.
-// 결과가 모자라 빈 페이지가 오거나 total 에 닿으면 멈춘다. max ≤ 0 이면 MaxResults.
-func (s *Service) NewsAll(ctx context.Context, query, sort string, max int) ([]NewsItem, error) {
-	if max <= 0 || max > MaxResults {
-		max = MaxResults
+// NewsAll 은 display 100 으로 start 를 넘기며 최대 limit 건(≤ MaxResults)을 모은다.
+// 결과가 모자라 짧은 페이지가 오거나 total 에 닿으면 멈춘다. limit ≤ 0 이면 MaxResults.
+//
+// 도중에 에러가 나면 그때까지 받은 결과(비어 있으면 [])와 에러를 함께 돌려준다.
+// SortDate 로 넘기는 사이 새 기사가 들어오면 페이지 경계에서 같은 기사가 두 번 올 수 있다 —
+// 필요하면 URL() 로 중복을 거른다.
+func (s *Service) NewsAll(ctx context.Context, query, sort string, limit int) ([]NewsItem, error) {
+	if limit <= 0 || limit > MaxResults {
+		limit = MaxResults
 	}
-	var all []NewsItem
-	for start := 1; start <= MaxStart && len(all) < max; start += MaxDisplay {
-		n := min(MaxDisplay, max-len(all))
+	all := []NewsItem{}
+	for start := 1; start <= MaxStart && len(all) < limit; start += MaxDisplay {
+		n := min(MaxDisplay, limit-len(all))
 		res, err := s.News(ctx, NewsParams{Query: query, Display: n, Start: start, Sort: sort})
 		if err != nil {
 			return all, err
@@ -113,24 +121,24 @@ func (s *Service) NewsAll(ctx context.Context, query, sort string, max int) ([]N
 			break
 		}
 	}
-	if all == nil {
-		all = []NewsItem{}
-	}
 	return all, nil
 }
 
+// ErrInvalidParams 는 인자가 범위를 벗어나 서버를 부르지 않았을 때의 에러다(재시도해도 소용없다).
+var ErrInvalidParams = errors.New("search: invalid params")
+
 func (p NewsParams) query() (url.Values, error) {
 	if strings.TrimSpace(p.Query) == "" {
-		return nil, fmt.Errorf("search: query is required")
+		return nil, fmt.Errorf("%w: query is required", ErrInvalidParams)
 	}
 	if p.Display < 0 || p.Display > MaxDisplay {
-		return nil, fmt.Errorf("search: display %d out of range 1~%d", p.Display, MaxDisplay)
+		return nil, fmt.Errorf("%w: display %d out of range 1~%d", ErrInvalidParams, p.Display, MaxDisplay)
 	}
 	if p.Start < 0 || p.Start > MaxStart {
-		return nil, fmt.Errorf("search: start %d out of range 1~%d", p.Start, MaxStart)
+		return nil, fmt.Errorf("%w: start %d out of range 1~%d", ErrInvalidParams, p.Start, MaxStart)
 	}
 	if p.Sort != "" && p.Sort != SortSim && p.Sort != SortDate {
-		return nil, fmt.Errorf("search: sort %q must be %q or %q", p.Sort, SortSim, SortDate)
+		return nil, fmt.Errorf("%w: sort %q must be %q or %q", ErrInvalidParams, p.Sort, SortSim, SortDate)
 	}
 	q := url.Values{"query": {p.Query}}
 	if p.Display > 0 {

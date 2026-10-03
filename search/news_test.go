@@ -2,6 +2,7 @@ package search
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -135,5 +136,54 @@ func TestClean(t *testing.T) {
 	it := NewsItem{OriginalLink: "", Link: "https://n.news.naver.com/x"}
 	if it.URL() != "https://n.news.naver.com/x" {
 		t.Error("URL falls back to Link")
+	}
+}
+
+func TestNewsAllCapIs1000(t *testing.T) {
+	var calls int
+	s := newService(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		start, _ := strconv.Atoi(r.URL.Query().Get("start"))
+		display, _ := strconv.Atoi(r.URL.Query().Get("display"))
+		if start > MaxStart {
+			t.Errorf("start %d exceeds server max", start)
+		}
+		items := "["
+		for i := 0; i < display; i++ {
+			if i > 0 {
+				items += ","
+			}
+			items += `{"title":"t","originallink":"","link":"l","description":"","pubDate":""}`
+		}
+		w.Write([]byte(`{"total":50000,"start":` + strconv.Itoa(start) + `,"display":` + strconv.Itoa(display) + `,"items":` + items + `]}`))
+	})
+	for _, limit := range []int{0, MaxResults, MaxResults + 99} {
+		calls = 0
+		all, err := s.NewsAll(context.Background(), "a", SortDate, limit)
+		if err != nil || len(all) != MaxResults || calls != 10 {
+			t.Errorf("limit %d: len=%d calls=%d err=%v; want %d in 10 calls", limit, len(all), calls, err, MaxResults)
+		}
+	}
+}
+
+func TestNewsValidationIsSentinel(t *testing.T) {
+	s := newService(t, func(http.ResponseWriter, *http.Request) {})
+	_, err := s.News(context.Background(), NewsParams{Query: "a", Display: 101})
+	if !errors.Is(err, ErrInvalidParams) {
+		t.Fatalf("want ErrInvalidParams, got %v", err)
+	}
+}
+
+func TestCleanKeepsBareAngleBrackets(t *testing.T) {
+	cases := map[string]string{
+		"PER<10배, PBR>1배 종목":   "PER<10배, PBR>1배 종목",
+		"A<B 그리고 C>D":          "A<B 그리고 C>D",
+		"<B>대문자</B> 태그":        "대문자 태그",
+		"&lt;속보&gt; <b>삼성</b>": "<속보> 삼성",
+	}
+	for in, want := range cases {
+		if got := Clean(in); got != want {
+			t.Errorf("Clean(%q) = %q; want %q", in, got, want)
+		}
 	}
 }

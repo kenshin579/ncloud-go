@@ -125,3 +125,67 @@ func TestGetJSONMasksSecret(t *testing.T) {
 		t.Fatalf("secret not masked: %v", err)
 	}
 }
+
+func TestGetJSONKeepsErrorChain(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		time.Sleep(200 * time.Millisecond)
+	}))
+	defer srv.Close()
+	c, _ := NewClient(testID, testSecret, WithBaseURL(srv.URL))
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	err := GetJSON(ctx, c, "/x", nil, &result{})
+	// 소비자가 타임아웃·취소를 실패와 구분해 캐시하지 않으려면 체인이 살아 있어야 한다.
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("errors.Is(DeadlineExceeded) = false: %v", err)
+	}
+}
+
+func TestGetJSONHTTPErrorAndStatus(t *testing.T) {
+	cases := []struct {
+		status int
+		body   string
+	}{
+		{502, "<html>Bad Gateway</html>"},
+		{429, `{"error":"quota"}`},
+		{400, `{"error":{}}`},
+	}
+	for _, tc := range cases {
+		c := serve(t, tc.status, tc.body, nil)
+		err := GetJSON(context.Background(), c, "/x", nil, &result{})
+		var he *HTTPError
+		if !errors.As(err, &he) || he.HTTPStatus != tc.status || StatusCode(err) != tc.status {
+			t.Errorf("%d %s: err=%v", tc.status, tc.body, err)
+		}
+	}
+	c := serve(t, 429, `{"errorCode":429,"errorMessage":"quota exceeded"}`, nil)
+	err := GetJSON(context.Background(), c, "/x", nil, &result{})
+	var ae *APIError
+	if !errors.As(err, &ae) || ae.Code != "429" || !IsRateLimited(err) {
+		t.Errorf("numeric api errorCode: err=%v", err)
+	}
+	if StatusCode(errors.New("x")) != 0 {
+		t.Error("StatusCode of non-http error must be 0")
+	}
+}
+
+func TestGetJSONErrorBodyOn200(t *testing.T) {
+	c := serve(t, 200, `{"errorMessage":"Incorrect query request","errorCode":"SE01"}`, nil)
+	err := GetJSON(context.Background(), c, "/x", nil, &result{})
+	var ae *APIError
+	if !errors.As(err, &ae) || ae.Code != "SE01" {
+		t.Fatalf("2xx error body must be an error, got %v", err)
+	}
+}
+
+func TestWithBaseURLTrailingSlash(t *testing.T) {
+	var r *http.Request
+	c := serve(t, 200, `{"total":0,"items":[]}`, &r)
+	c2, _ := NewClient(testID, testSecret, WithBaseURL(c.baseURL+"/"))
+	if err := GetJSON(context.Background(), c2, "/search/v1/news", nil, &result{}); err != nil {
+		t.Fatal(err)
+	}
+	if r.URL.Path != "/search/v1/news" {
+		t.Errorf("path = %q", r.URL.Path)
+	}
+}
